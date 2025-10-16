@@ -1,0 +1,29 @@
+project:
+  type: book
+
+book:
+  title: "Variables Aleatorias Discretas"
+  author: "Economia Industrial"
+  chapters:
+    - index.qmd
+    - TCL.qmd
+    - uniforme_discreta_.qmd
+    - bernoulli_binomial.qmd
+    - geometrica_.qmd
+    - binomial_negativa_.qmd
+    - hipergeometrica_.qmd
+    - poisson_.qmd
+
+bibliography: references_.bib
+
+format:
+  html:
+    theme: cosmo
+    code-fold: true
+    fig-width: 8
+    fig-height: 6
+    fig-align: "center"
+
+
+
+
