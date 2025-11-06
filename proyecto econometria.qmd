@@ -1,0 +1,351 @@
+---
+title: "Análisis de Factores en la Aprobación de Crédito Hipotecario"
+author: "Andrade Guerrero Alejandro, 
+         Gutiérrez Palomo Pedro Ángel, 
+         Vázquez Cisneros Darío Emanuel"
+format: html
+toc: true
+toc-depth: 2
+toc-location: left
+number-sections: true
+theme: flatly
+css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  fig.width = 10,
+  fig.height = 6
+)
+```
+
+
+
+## Planteamiento
+
+Tomaremos del supuesto que los factores socioeconómicos sobre el hogar como seria: ingreso, edad, educacion, tamaño, tipo de empleo, acceso a seguridad social, zona de residencia, etc. Influyen en la probabilidad de las personas al momento de adquirir una vivienda mediante crédito.
+
+Hipótesis Mientras mayores sean los ingresos y el nivel educativo en el hogar, mayor sera la probabilidad que se tenga para poder acceder a un crédito hipotecario.
+
+Este modelo teórico establece que se dependera de las características socioeconómicas en la hora de adquisición con crédito.
+
+$$
+\text{Logit}(P_i) = \ln\left(\frac{P_i}{1 - P_i}\right) = \beta_0 + \beta_1 ingreso_i + \beta_2 educación_i + \beta_3 edad_i + \beta_4 Residencia_i + \beta_5 seguridad\_social_i + \varepsilon_i
+$$
+
+Los datos que tomaremos en este caso provienen de ENIGH (INEGI), los cuales se complementaran tambien con fuentes del INFONAVIT, FOVISSSTE y la Sociedad Hipotecaria Federal, todo esto para contextualizar el acceso a este crédito. Se seleccionan hogares los cuales reportan haber adquirido una vivienda, indicando su fuente de financiamiento de esta.
+
+Se utilizara un modelo de regresión logistica binaria, dado que nuestra variable dependiente es dicotómica:
+
+$$\text{Logit}(P_i) = \ln\left(\frac{P_i}{1 - P_i}\right) = \beta_0 + \beta_1 \text{Ingreso}_i + \beta_2 \text{Educación}_i + \beta_3 \text{Edad}_i + \beta_4 \text{Residencia}_i + \beta_5 \text{SeguridadSocial}_i + \varepsilon_i$$
+
+Los resultados que nos muestre nos permitirán poder identificar que fáctores socioeconómicos son los que pueden facilitar o limitar en caso contrario el acceso a los créditos hipotecarios. Esto podria ayudar a las instituciones como son SEDATU, INFONAVIT Y SFH para poder diseñar políticas que amplíen este acceso al financiamento de vivienda.
+
+
+# CARGA Y SELECCION DE VARIABLES
+
+```{r}
+# Cargar librerías necesarias
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(pROC)
+library(car)
+library(corrplot)
+
+# Cargar los datos
+datos <- read_excel("Base_de_datos.csv.xlsx", 
+    col_types = c("skip", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric"))
+
+# Ver estructura de los datos
+str(datos)
+head(datos)
+
+# Preparar variables
+datos <- datos %>%
+  mutate(credito_aceptado = ifelse(credito == 1, 1, 0))
+
+# Verificar la distribución
+table(datos$credito_aceptado)
+prop.table(table(datos$credito_aceptado))
+
+# Seleccionar y preparar variables para el modelo
+variables_modelo <- datos %>%
+  select(
+    credito_aceptado,
+    educacion,           # Variable principal 1
+    ing_promedio_total_semestral,  # Variable principal 2
+    alfabetismo,         # Variable de control
+    edad,                # Variable de control
+    sexo,                # Variable de control
+    residencia,          # Variable de control
+    seg_soc,             # Variable de control
+    nivel_social         # Variable de control
+  ) %>%
+  mutate(
+    credito_aceptado = as.factor(credito_aceptado),
+    alfabetismo = as.factor(alfabetismo),
+    sexo = as.factor(sexo),
+    residencia = as.factor(residencia),
+    seg_soc = as.factor(seg_soc),
+    nivel_social = as.factor(nivel_social)
+  )
+
+# Verificar que no hay NA
+sum(is.na(variables_modelo))
+```
+
+# ANALISIS
+
+```{r}
+# Resumen estadístico
+summary(variables_modelo)
+
+# Visualizaciones de relaciones principales
+# Relación entre educación y crédito
+ggplot(variables_modelo, aes(x = educacion, fill = credito_aceptado)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribución de Educación por Aceptación de Crédito")
+
+# Relación entre ingreso y crédito
+ggplot(variables_modelo, aes(x = ing_promedio_total_semestral, fill = credito_aceptado)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Distribución de Ingreso por Aceptación de Crédito") +
+  scale_x_continuous(trans = "log10")
+
+# Diagrama de bigote del ingreso por aceptación de crédito
+ggplot(variables_modelo, aes(x = credito_aceptado, y = ing_promedio_total_semestral, fill = credito_aceptado)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.5) +
+  scale_y_continuous(labels = scales::comma, trans = "log10") +
+  labs(
+    title = "Distribución de Ingreso por Aceptación de Crédito Hipotecario",
+    subtitle = "Diagrama de Bigote - Escala Logarítmica",
+    x = "Crédito Aceptado",
+    y = "Ingreso Promedio Semestral (escala log10)",
+    caption = "Fuente: ENIGH - Elaboración propia"
+  ) +
+  scale_fill_manual(
+    values = c("0" = "#ff6b6b", "1" = "#4ecdc4"),
+    labels = c("Rechazado", "Aceptado")
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.y = element_text(angle = 0)
+  )
+
+# Estadísticas descriptivas del ingreso por grupo
+estadisticas_ingreso <- variables_modelo %>%
+  group_by(credito_aceptado) %>%
+  summarise(
+    n = n(),
+    media = mean(ing_promedio_total_semestral, na.rm = TRUE),
+    mediana = median(ing_promedio_total_semestral, na.rm = TRUE),
+    desviacion = sd(ing_promedio_total_semestral, na.rm = TRUE),
+    q1 = quantile(ing_promedio_total_semestral, 0.25, na.rm = TRUE),
+    q3 = quantile(ing_promedio_total_semestral, 0.75, na.rm = TRUE),
+    min = min(ing_promedio_total_semestral, na.rm = TRUE),
+    max = max(ing_promedio_total_semestral, na.rm = TRUE)
+  )
+
+print(estadisticas_ingreso)
+
+# Test de diferencia de medianas (no paramétrico)
+wilcox_test <- wilcox.test(ing_promedio_total_semestral ~ credito_aceptado, data = variables_modelo)
+print(wilcox_test)
+```
+
+# MULTICOLINEALIDAD
+
+```{r}
+# Verificar la estructura de las variables
+str(variables_modelo$nivel_social)
+table(variables_modelo$nivel_social)
+
+# Diagrama de cajas: Ingreso por nivel social
+ggplot(variables_modelo, aes(x = factor(nivel_social), y = ing_promedio_total_semestral, fill = factor(nivel_social))) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  scale_y_continuous(labels = scales::comma, trans = "log10") +
+  labs(
+    title = "Relación entre Ingreso y Nivel Social",
+    subtitle = "Diagrama de Bigote - Escala Logarítmica",
+    x = "Nivel Social",
+    y = "Ingreso Promedio Semestral (log10)"
+  ) +
+  theme_minimal()
+
+# Estadísticas descriptivas del ingreso por nivel social
+estadisticas_nivel_social <- variables_modelo %>%
+  group_by(nivel_social) %>%
+  summarise(
+    n = n(),
+    media_ingreso = mean(ing_promedio_total_semestral, na.rm = TRUE),
+    mediana_ingreso = median(ing_promedio_total_semestral, na.rm = TRUE),
+    sd_ingreso = sd(ing_promedio_total_semestral, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+print(estadisticas_nivel_social)
+
+# Test ANOVA para diferencia de medias entre niveles sociales
+anova_test <- aov(ing_promedio_total_semestral ~ factor(nivel_social), data = variables_modelo)
+summary(anova_test)
+
+# Correlación punto-biserial (para variable categórica ordinal)
+variables_modelo <- variables_modelo %>%
+  mutate(nivel_social_num = as.numeric(as.character(nivel_social)))
+
+cor_test <- cor.test(variables_modelo$ing_promedio_total_semestral, 
+                     variables_modelo$nivel_social_num, 
+                     method = "spearman")
+print(cor_test)
+
+# Tabla de contingencia: Nivel social vs Aceptación de crédito
+table(variables_modelo$nivel_social, variables_modelo$credito_aceptado)
+prop.table(table(variables_modelo$nivel_social, variables_modelo$credito_aceptado), margin = 1) * 100
+
+# Matriz de correlaciones para variables numéricas
+variables_numericas <- variables_modelo %>%
+  select(ing_promedio_total_semestral, educacion, edad, nivel_social_num) %>%
+  na.omit()
+
+cor_matrix <- cor(variables_numericas, method = "spearman")
+print(cor_matrix)
+
+# Visualizar matriz de correlaciones
+corrplot(cor_matrix, method = "color", type = "upper", 
+         tl.col = "black", tl.srt = 45,
+         title = "Matriz de Correlaciones entre Variables Numéricas",
+         mar = c(0,0,1,0))
+
+# Factor de Inflación de la Varianza (VIF) para detectar multicolinealidad
+modelo_auxiliar <- lm(ing_promedio_total_semestral ~ educacion + edad + factor(nivel_social), 
+                      data = variables_modelo)
+vif_results <- vif(modelo_auxiliar)
+print(vif_results)
+```
+
+# MODELOS DE REGRESION LOGISTICA
+
+```{r}
+# Modelo 1: Solo variables principales (hipótesis)
+modelo_logistico <- glm(
+  credito_aceptado ~ educacion + ing_promedio_total_semestral,
+  data = variables_modelo,
+  family = binomial(link = "logit")
+)
+
+cat("MODELO 1: VARIABLES PRINCIPALES\n")
+summary(modelo_logistico)
+
+# Modelo 2: Completo con todas las variables
+modelo_completo <- glm(
+  credito_aceptado ~ educacion + ing_promedio_total_semestral + 
+    alfabetismo + edad + sexo + residencia + seg_soc + nivel_social,
+  data = variables_modelo,
+  family = binomial(link = "logit")
+)
+
+cat("\nMODELO 2: CON VARIABLES DE CONTROL\n")
+summary(modelo_completo)
+
+# Comparar modelos (test de razón de verosimilitud)
+cat("\n=== COMPARACIÓN DE MODELOS ===\n")
+anova(modelo_logistico, modelo_completo, test = "Chisq")
+
+# Extraer coeficientes exponenciados (odds ratios) del mejor modelo
+coeficientes <- exp(coef(modelo_completo))
+resultados_modelo <- data.frame(
+  Variable = names(coeficientes),
+  Odds_Ratio = round(coeficientes, 4),
+  p_value = round(summary(modelo_completo)$coefficients[,4], 4)
+)
+print(resultados_modelo)
+```
+
+# PREDICCIONES
+
+```{r}
+# Usar el modelo completo para predicciones
+predicciones <- predict(modelo_completo, type = "response")
+variables_modelo$prob_predicha <- predicciones
+
+# Convertir a clasificación (umbral 0.5)
+variables_modelo$prediccion <- ifelse(predicciones > 0.5, 1, 0) %>% as.factor()
+
+# Matriz de confusión
+cat("MATRIZ DE CONFUSIÓN\n")
+confusionMatrix(variables_modelo$prediccion, variables_modelo$credito_aceptado)
+
+# Curva ROC
+roc_curve <- roc(variables_modelo$credito_aceptado, predicciones)
+plot(roc_curve, main = "Curva ROC del Modelo")
+auc_val <- auc(roc_curve)
+cat("\nAUC del modelo:", round(auc_val, 3))
+```
+
+# ANALISIS PROFUNDO Y RESULTADOS
+
+```{r}
+# Gráfico de dispersión con faceta por nivel social
+ggplot(variables_modelo, aes(x = educacion, y = ing_promedio_total_semestral, color = credito_aceptado)) +
+  geom_point(alpha = 0.6) +
+  facet_wrap(~ nivel_social, scales = "free_y") +
+  scale_y_continuous(trans = "log10", labels = scales::comma) +
+  labs(
+    title = "Relación Educación-Ingreso por Nivel Social y Aceptación de Crédito",
+    x = "Educación",
+    y = "Ingreso (log10)"
+  ) +
+  theme_minimal()
+
+# Medias de ingreso por nivel social con intervalos de confianza
+variables_modelo %>%
+  group_by(nivel_social) %>%
+  summarise(
+    media_ingreso = mean(ing_promedio_total_semestral),
+    error_estandar = sd(ing_promedio_total_semestral) / sqrt(n()),
+    limite_inferior = media_ingreso - 1.96 * error_estandar,
+    limite_superior = media_ingreso + 1.96 * error_estandar
+  ) %>%
+  ggplot(aes(x = factor(nivel_social), y = media_ingreso)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = limite_inferior, ymax = limite_superior), width = 0.2) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "Ingreso Promedio por Nivel Social con Intervalos de Confianza",
+    x = "Nivel Social",
+    y = "Ingreso Promedio Semestral"
+  ) +
+  theme_minimal()
+
+# Resultados finales para interpretación
+cat("RESULTADOS FINALES PARA INTERPRETACIÓN\n")
+exp(coef(modelo_logistico))
+```
+
+# CONCLUSIONES
+
+Después de nuestros resultados podemos concluir que nuestras dos variables principales (educación e ingreso) son estadísticamente significativas en la probabilidad de que el crédito hipotecario sea aprobado o no. Lo que nos genera una gran aceptación a nuestra hipótesis planteada inicialmente. Sin embargo, nuestras otras variables como seria el alfabetismo, edad, sexo, residencia o seguridad social, aunque no fueron tan significativas como estas, podemos concluir lo siguiente:
+
+  • Si el Alfabetismo es positivo tendrá una mayor aprobación. 
+  • El sexo puede no ser significativo para la aprobación del crédito. 
+  • Residencia Urbana suele tener poca importancia. • Seguridad social suele tener también poca importancia.
+  
+La edad presenta un máximo en donde decrece, es decir, en cierta edad es màs fácil acceder a un crédito hipotecario debido a que aún existe una vida laboral extensa, pero conforme se empieza a reducir esta vida laboral, las posibilidades de crédito empiezan a decaer.
+
+Si bien, existen unas variables que nos permiten predecir de buena manera nuestra hipótesis, es claro decir que aún pueden existir sesgos de contexto social, el cual puede limitar nuestra predicción.
+
+Con el diagrama de caja y bigote podemos denotar que las familiar con un ingreso más alto es más probable que tengan acceso a crédito, comprobando así nuestra hipótesis inicial y demostrando una falta de política pública a la que las personas de bajo ingreso puedan acceder a estos créditos.
+
+
+
